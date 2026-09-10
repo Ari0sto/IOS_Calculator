@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, StatusBar, Platform } from 'react-native';
-
 import Svg, { Path } from 'react-native-svg';
 
 // кастомная иконка delete
@@ -20,8 +19,9 @@ interface CalcButtonType {
 }
 
 export default function CalculatorScreen() {
-  const [history, setHistory] = useState<string>('1+2+3');
-  const [result, setResult] = useState<string>('6');
+  const [history, setHistory] = useState<string>('');
+  const [result, setResult] = useState<string>('0');
+  const [resetNext, setResetNext] = useState<boolean>(false);
 
   const buttons: CalcButtonType[] = [
     { label: 'delete', color: 'light' },
@@ -49,9 +49,137 @@ export default function CalculatorScreen() {
     { label: ',', color: 'dark' },
     { label: '=', color: 'orange' },
   ];
-  // Функция для обработки нажатия кнопки (log в консоль)
+
+  const evaluateMath = (expr: string): string => {
+    try {
+      let mathExpr = expr
+        .replace(/×/g, '*')
+        .replace(/÷/g, '/')
+        .replace(/−/g, '-')
+        .replace(/,/g, '.');
+
+      const res = new Function(`return ${mathExpr}`)();
+      
+      if (isNaN(res) || !isFinite(res)) return 'Ошибка';
+
+      const rounded = Math.round(res * 1e10) / 1e10;
+      return String(rounded).replace('.', ',');
+    } catch (error) {
+      return 'Ошибка';
+    }
+  };
+
   const handleButtonClick = (label: string): void => {
-    console.log(`Нажата кнопка: ${label}`);
+    const isOperator = ['+', '−', '×', '÷'].includes(label);
+    const isNumber = /^[0-9]$/.test(label);
+
+    if (label === 'AC') {
+      setHistory('');
+      setResult('0');
+      setResetNext(false);
+      return;
+    }
+
+    if (label === 'delete') {
+      if (resetNext || result === 'Ошибка') return;
+      setResult(result.length > 1 ? result.slice(0, -1) : '0');
+      return;
+    }
+
+    if (label === '+/-') {
+      if (result !== '0' && result !== 'Ошибка') {
+        setResult(result.startsWith('-') ? result.slice(1) : '-' + result);
+      }
+      return;
+    }
+
+    // ЛОГИКА ПРОЦЕНТОВ
+    if (label === '%') {
+      if (result === 'Ошибка') return;
+      
+      const val = parseFloat(result.replace(',', '.'));
+      if (isNaN(val)) return;
+
+      // Очистка истории, если вычисляем процент сразу после =
+      if (history.endsWith('=')) {
+        setHistory('');
+      }
+
+      let percentVal = val / 100;
+      const lastOperator = history.slice(-1);
+      const isAddSub = lastOperator === '+' || lastOperator === '−';
+
+      // Если предыдущий оператор + или -, вычисляем процент от истории
+      if (isAddSub && history.length > 0) {
+        const baseExpr = history.slice(0, -1);
+        if (baseExpr) {
+          const evalStr = evaluateMath(baseExpr);
+          if (evalStr !== 'Ошибка') {
+            const baseValue = parseFloat(evalStr.replace(',', '.'));
+            percentVal = baseValue * (val / 100);
+          }
+        }
+      }
+
+      // Вывод результата процента
+      const rounded = Math.round(percentVal * 1e10) / 1e10;
+      setResult(String(rounded).replace('.', ','));
+      setResetNext(true);
+      return;
+    }
+
+    if (isNumber) {
+      if (history.endsWith('=')) {
+        setHistory('');
+        setResult(label);
+        setResetNext(false);
+      } else if (resetNext || result === 'Ошибка') {
+        setResult(label);
+        setResetNext(false);
+      } else {
+        setResult(result === '0' ? label : result + label);
+      }
+      return;
+    }
+
+    if (label === ',') {
+      if (history.endsWith('=')) {
+        setHistory('');
+        setResult('0,');
+        setResetNext(false);
+      } else if (resetNext || result === 'Ошибка') {
+        setResult('0,');
+        setResetNext(false);
+      } else if (!result.includes(',')) {
+        setResult(result + ',');
+      }
+      return;
+    }
+
+    if (isOperator) {
+      if (result === 'Ошибка') return;
+      
+      if (history.endsWith('=')) {
+        setHistory(result + label);
+      } else if (resetNext && history) {
+        setHistory(history.slice(0, -1) + label);
+      } else {
+        setHistory(history + result + label);
+      }
+      setResetNext(true);
+      return;
+    }
+
+    if (label === '=') {
+      if (history.endsWith('=') || result === 'Ошибка' || !history) return;
+      
+      const fullExpr = history + result;
+      const calcResult = evaluateMath(fullExpr);
+      
+      setHistory(fullExpr + '=');
+      setResult(calcResult);
+      setResetNext(true);
+    }
   };
 
   const getBackgroundColor = (color: ButtonColor) => {
@@ -67,8 +195,8 @@ export default function CalculatorScreen() {
       <StatusBar barStyle="light-content" />
 
       <View style={styles.displayContainer}>
-        <Text style={styles.historyText}>{history}</Text>
-        <Text style={styles.resultText}>{result}</Text>
+        <Text style={styles.historyText} numberOfLines={1}>{history}</Text>
+        <Text style={styles.resultText} numberOfLines={1} adjustsFontSizeToFit>{result}</Text>
       </View>
 
       <View style={styles.buttonsContainer}>
@@ -83,7 +211,6 @@ export default function CalculatorScreen() {
               style={[
                 styles.button,
                 { backgroundColor: getBackgroundColor(btn.color) },
-                // Черная обводка (которая не работает)
                 !isOperator && { borderWidth: 1, borderColor: '#000000' }
               ]}
               onPress={() => handleButtonClick(btn.label)}
@@ -97,7 +224,6 @@ export default function CalculatorScreen() {
                   styles.buttonText,
                   isOperator && styles.operatorText,
                   isPlusMinus && styles.plusMinusText,
-                  // настройки размера для знака деления
                   btn.label === '÷' && {
                     fontSize: 62,
                     fontWeight: '300',
